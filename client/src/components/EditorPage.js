@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import Client from "./Client";
-import Editor from "./Editor";
+import Editor from "@monaco-editor/react"; // Use Editor component from @monaco-editor/react
 import { initSocket } from "../Socket";
 import { ACTIONS } from "../Actions";
 import {
@@ -13,13 +13,15 @@ import { toast } from "react-hot-toast";
 
 function EditorPage() {
   const [clients, setClients] = useState([]);
-  const codeRef = useRef(null);
+  const codeRef = useRef(""); // Keep the latest code in this ref
+  const editorRef = useRef(null);
 
-  const Location = useLocation();
+  const location = useLocation();
   const navigate = useNavigate();
   const { roomId } = useParams();
 
   const socketRef = useRef(null);
+
   useEffect(() => {
     const init = async () => {
       socketRef.current = await initSocket();
@@ -34,55 +36,57 @@ function EditorPage() {
 
       socketRef.current.emit(ACTIONS.JOIN, {
         roomId,
-        username: Location.state?.username,
+        username: location.state?.username,
       });
 
-      // Listen for new clients joining the chatroom
-      socketRef.current.on(
-        ACTIONS.JOINED,
-        ({ clients, username, socketId }) => {
-          // this insure that new user connected message do not display to that user itself
-          if (username !== Location.state?.username) {
-            toast.success(`${username} joined the room.`);
-          }
-          setClients(clients);
-          // also send the code to sync
-          socketRef.current.emit(ACTIONS.SYNC_CODE, {
-            code: codeRef.current,
-            socketId,
-          });
+      socketRef.current.on(ACTIONS.JOINED, ({ clients, username, socketId }) => {
+        if (username !== location.state?.username) {
+          toast.success(`${username} joined the room.`);
         }
-      );
+        setClients(clients);
 
-      // listening for disconnected
+        socketRef.current.emit(ACTIONS.SYNC_CODE, {
+          code: codeRef.current, // Send the latest code when a new user joins
+          socketId,
+        });
+      });
+
       socketRef.current.on(ACTIONS.DISCONNECTED, ({ socketId, username }) => {
         toast.success(`${username} left the room`);
         setClients((prev) => {
           return prev.filter((client) => client.socketId !== socketId);
         });
       });
+
+      socketRef.current.on(ACTIONS.CODE_CHANGE, ({ code }) => {
+        // Update the editor content when a change is received from another user
+        if (editorRef.current && code !== codeRef.current) {
+          codeRef.current = code; // Keep track of the latest code
+          editorRef.current.setValue(code);
+        }
+      });
     };
     init();
 
-    // cleanup
     return () => {
       socketRef.current && socketRef.current.disconnect();
       socketRef.current.off(ACTIONS.JOINED);
       socketRef.current.off(ACTIONS.DISCONNECTED);
+      socketRef.current.off(ACTIONS.CODE_CHANGE);
     };
-  }, []);
+  }, [location.state?.username, navigate, roomId]);
 
-  if (!Location.state) {
+  if (!location.state) {
     return <Navigate to="/" />;
   }
 
   const copyRoomId = async () => {
     try {
       await navigator.clipboard.writeText(roomId);
-      toast.success(`roomIs is copied`);
+      toast.success(`Room ID is copied`);
     } catch (error) {
       console.log(error);
-      toast.error("unable to copy the room Id");
+      toast.error("Unable to copy the Room ID");
     }
   };
 
@@ -90,10 +94,17 @@ function EditorPage() {
     navigate("/");
   };
 
+  const handleEditorChange = (value) => {
+    codeRef.current = value; // Update the latest code
+    socketRef.current.emit(ACTIONS.CODE_CHANGE, {
+      roomId,
+      code: value,
+    });
+  };
+
   return (
     <div className="container-fluid vh-100">
       <div className="row h-100">
-        {/* client panel */}
         <div
           className="col-md-2 bg-dark text-light d-flex flex-column h-100"
           style={{ boxShadow: "2px 0px 4px rgba(0, 0, 0, 0.1)" }}
@@ -105,18 +116,14 @@ function EditorPage() {
             style={{ maxWidth: "150px", marginTop: "-43px" }}
           />
           <hr style={{ marginTop: "-3rem" }} />
-
-          {/* Client list container */}
           <div className="d-flex flex-column flex-grow-1 overflow-auto">
             <span className="mb-2">Members</span>
             {clients.map((client) => (
               <Client key={client.socketId} username={client.username} />
             ))}
           </div>
-
           <hr />
-          {/* Buttons */}
-          <div className="mt-auto ">
+          <div className="mt-auto">
             <button className="btn btn-success" onClick={copyRoomId}>
               Copy Room ID
             </button>
@@ -128,15 +135,14 @@ function EditorPage() {
             </button>
           </div>
         </div>
-
-        {/* Editor panel */}
-        <div className="col-md-10 text-light d-flex flex-column h-100 ">
+        <div className="col-md-10 text-light d-flex flex-column h-100">
           <Editor
-            socketRef={socketRef}
-            roomId={roomId}
-            onCodeChange={(code) => {
-              codeRef.current = code;
-            }}
+            height="100%"
+            theme="vs-dark"
+            defaultLanguage="javascript"
+            defaultValue="// Start coding..."
+            onChange={handleEditorChange}
+            onMount={(editor) => (editorRef.current = editor)}
           />
         </div>
       </div>
