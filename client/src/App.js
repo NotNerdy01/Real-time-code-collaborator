@@ -2,7 +2,6 @@ import './App.css';
 import { Routes, Route } from "react-router-dom";
 import Home from './components/Home';
 import EditorPage from './components/EditorPage';
-import MainPage from './components/MainPage';
 import { Toaster } from 'react-hot-toast';
 
 function App() {
